@@ -30,11 +30,14 @@ knowledge of each other's public key.
   with $info$ as the info string
 - $Hash(payload)$: Calculate the SHA256 hash of $payload$ and truncate the
   output to the first 16 bytes.
+- $InitialEncryptionKeyInfo$: The string `initial_encryption_key`
+- $ServerEphemeralPublicKeyMacKeyInfo$: The string
+  `server_ephemeral_public_key_mac_key`
 
 ### Packet 1: client to server (49 bytes)
 
 Let $InitialKey = DeriveKey(X25519(CE_{sec}, SS_{pub}),
-"initial\_encryption\_key")$.
+InitialEncryptionKeyInfo)$.
 
 | Field                                  | Length |
 | -------------------------------------- | ------ |
@@ -47,7 +50,7 @@ Let $InitialKey = DeriveKey(X25519(CE_{sec}, SS_{pub}),
 Lookup client static public key $CS_{pub}$ from the provided hash.
 
 Let $ServerSepkMacKey = DeriveKey(X25519(SS_{sec}, CE_{pub}),
-"server\_ephemeral\_public\_key\_mac\_key")$.
+ServerEphemeralPublicKeyMacKeyInfo)$.
 
 Let $ServerSessionKey = Concat(X25519(SE_{sec}, CS_{pub}), X25519(SE_{sec},
 CE_{pub}))$.
@@ -61,7 +64,7 @@ CE_{pub}))$.
 ### Finalize (client)
 
 Let $ClientSepkMacKey = DeriveKey(X25519(CE_{sec}, SS_{pub}),
-"server\_ephemeral\_public\_key\_mac\_key")$.
+ServerEphemeralPublicKeyMacKeyInfo)$.
 
 Check that:
 
