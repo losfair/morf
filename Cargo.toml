@@ -1,0 +1,21 @@
+[package]
+name = "morf"
+version = "0.1.0"
+edition = "2021"
+description = "Simple authenticated encryption layer over RF"
+authors = ["Heyang Zhou <zhy20000919@hotmail.com>"]
+license = "Apache-2.0"
+
+[dependencies]
+chacha20 = { version = "0.9", default-features = false }
+chacha20poly1305 = { version = "0.10", default-features = false }
+constant_time_eq = "0.3"
+hkdf = { version = "0.12", default-features = false }
+hmac = { version = "0.12", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets"] }
+
+[dev-dependencies]
+rand = "0.8"
+rand_chacha = "0.3"
+base64 = "0.21"
