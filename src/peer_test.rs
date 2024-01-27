@@ -1,7 +1,5 @@
 use base64::Engine;
-use hmac::digest::{FixedOutput, Update};
 use rand::{Rng, SeedableRng};
-use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::peer::MorfPeer;
@@ -27,10 +25,8 @@ fn roundtrip() {
   .unwrap();
 
   // Device static public key hash should match
-  let mut hasher = <Sha256 as sha2::Digest>::new();
-  hasher.update(device_static_public_key.as_bytes());
   assert_eq!(
-    hasher.finalize_fixed()[..16],
+    blake3::hash(device_static_public_key.as_bytes()).as_bytes()[..16],
     handshake_info.device_static_public_key_hash[..]
   );
 
@@ -109,30 +105,30 @@ fn check_ciphertext() {
 
   assert_eq!(
     base64::engine::general_purpose::STANDARD.encode(client_handshake_packet.as_ref()),
-    "A8gHzXTONYbJ9tR2d0U1v0P36c7k/xFKWxLRl28fSh42t8H6LTf7CmCCXib6hsT//Q=="
+    "A8gHzXTONYbJ9tR2d0U1v0P36c7k/xFKWxLRl28fSh42HZP1NITDbdHqzOB94AdOWw=="
   );
   assert_eq!(
     base64::engine::general_purpose::STANDARD.encode(handshake_info_device_static_public_key_hash),
-    "i+RvlyLVyVGX+huSYNw5NQ=="
+    "rQi7K0plwLPeAb2ZnkjMxw=="
   );
   assert_eq!(
     base64::engine::general_purpose::STANDARD.encode(server_handshake_packet.as_ref()),
-    "ATo0uXENMCyX+aOeGs5uH1B4QHTWWHYI+hO9zrvHeng1aoLwS/N1Hky7Guw4qLGowA=="
+    "ATo0uXENMCyX+aOeGs5uH1B4QHTWWHYI+hO9zrvHeng11WjF8G12OauH2cynIOKFhw=="
   );
   assert_eq!(
     base64::engine::general_purpose::STANDARD.encode(&full_packet_1),
-    "AgABj0e/OuyiO4fuMCosf03lUwj7bM8="
+    "AgABuykflVCnNcq9Pie2G976UXLoeYc="
   );
   assert_eq!(
     base64::engine::general_purpose::STANDARD.encode(&full_packet_2),
-    "AgACzHjZ8SogrPN4OIhuHrMG0LFVbBQ="
+    "AgACuRkGyABHk7AKWqbfZc48iOo33y0="
   );
   assert_eq!(
     base64::engine::general_purpose::STANDARD.encode(&full_packet_3),
-    "AgABNxKE/T1AVdUiNJjUu0GLvklhczk="
+    "AgABbamXk6yAc0YeHbkQvO77wgE/SHQ="
   );
   assert_eq!(
     base64::engine::general_purpose::STANDARD.encode(&full_packet_4),
-    "AgACuqUCU9WLoNDCMaI2pSqfa+kO0XQ="
+    "AgAC5ryo5+VtCn8EwwEE2Ww7NecmksQ="
   );
 }

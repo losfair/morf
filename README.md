@@ -6,7 +6,7 @@ packet links with small MTUs, e.g. LoRa. Inspired by
 
 - `no_std` compatible, no dynamic memory allocation
 - Minimum supported MTU: 49 bytes, overhead per data packet: 19 bytes
-- Primitives: X25519 + HMAC-SHA256 + ChaCha20-Poly1305
+- Primitives: X25519 + BLAKE3 + ChaCha20-Poly1305
 - Identity hiding, forward secrecy, replay protection
 
 ## Handshake
@@ -24,11 +24,11 @@ knowledge of each other's public key.
 - $X25519(secret, public)$: X25519 Diffie-Hellman key agreement
 - $ChaCha20(key, payload)$: Apply (unauthenticated) ChaCha20 keystream derived
   from $key$ to $payload$
-- $Mac(key, payload)$: Apply HMAC-SHA256 with $key$ to $payload$, and truncate
-  the output to the first 16 bytes.
-- $DeriveKey(key, info)$: Derive a 32-byte subkey from $key$ using HKDF-SHA256
-  with $info$ as the info string
-- $Hash(payload)$: Calculate the SHA256 hash of $payload$ and truncate the
+- $Mac(key, payload)$: Apply BLAKE3 keyed hash with $key$ to $payload$, and
+  truncate the output to the first 16 bytes.
+- $DeriveKey(key, info)$: Derive a 32-byte subkey from $key$ using BLAKE3 as a
+  KDF with $info$ as the info string
+- $Hash(payload)$: Calculate the BLAKE3 hash of $payload$ and truncate the
   output to the first 16 bytes.
 - $InitialEncryptionKeyInfo$: The string `initial_encryption_key`
 - $ServerEphemeralPublicKeyMacKeyInfo$: The string

@@ -1,20 +1,14 @@
 use chacha20::{cipher::StreamCipher, ChaCha20};
 use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, ChaChaPoly1305, KeyInit};
-use hkdf::Hkdf;
-use hmac::{
-  digest::{FixedOutput, Update},
-  Hmac, Mac,
-};
-use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 // for early_kdf
-const INITIAL_ENCRYPTION_KEY_INFO: &[u8] = b"initial_encryption_key";
-const SERVER_EPHEMERAL_PUBLIC_KEY_MAC_KEY_INFO: &[u8] = b"server_ephemeral_public_key_mac_key";
+const INITIAL_ENCRYPTION_KEY_INFO: &str = "initial_encryption_key";
+const SERVER_EPHEMERAL_PUBLIC_KEY_MAC_KEY_INFO: &str = "server_ephemeral_public_key_mac_key";
 
 // for session_kdf
-const S2C_STREAM_KEY_INFO: &[u8] = b"s2c_stream_key";
-const C2S_STREAM_KEY_INFO: &[u8] = b"c2s_stream_key";
+const S2C_STREAM_KEY_INFO: &str = "s2c_stream_key";
+const C2S_STREAM_KEY_INFO: &str = "c2s_stream_key";
 
 pub struct MorfPeer {
   tx_cipher: Option<ChaCha20Poly1305>,
@@ -40,31 +34,22 @@ pub struct UnauthenticatedClientHandshake {
 
 impl UnauthenticatedClientHandshake {
   pub fn authenticate(self, device_static_public_key: &PublicKey, peer: &mut MorfPeer) {
-    let session_kdf = {
-      let mut keybuf = [0u8; 64];
-      keybuf[0..32].copy_from_slice(
-        self
-          .server_ephemeral_secret_key
-          .diffie_hellman(device_static_public_key)
-          .as_bytes(),
-      );
-      keybuf[32..64].copy_from_slice(
-        self
-          .server_ephemeral_secret_key
-          .diffie_hellman(&self.client_ephemeral_public_key)
-          .as_bytes(),
-      );
-      Hkdf::<Sha256>::new(None, &keybuf)
-    };
+    let mut session_key_material = [0u8; 64];
+    session_key_material[0..32].copy_from_slice(
+      self
+        .server_ephemeral_secret_key
+        .diffie_hellman(device_static_public_key)
+        .as_bytes(),
+    );
+    session_key_material[32..64].copy_from_slice(
+      self
+        .server_ephemeral_secret_key
+        .diffie_hellman(&self.client_ephemeral_public_key)
+        .as_bytes(),
+    );
 
-    let mut tx_stream_key = [0u8; 32];
-    session_kdf
-      .expand(S2C_STREAM_KEY_INFO, &mut tx_stream_key)
-      .unwrap();
-    let mut rx_stream_key = [0u8; 32];
-    session_kdf
-      .expand(C2S_STREAM_KEY_INFO, &mut rx_stream_key)
-      .unwrap();
+    let tx_stream_key: [u8; 32] = blake3::derive_key(S2C_STREAM_KEY_INFO, &session_key_material);
+    let rx_stream_key: [u8; 32] = blake3::derive_key(C2S_STREAM_KEY_INFO, &session_key_material);
 
     assert!(peer.tx_cipher.is_none() && peer.rx_cipher.is_none());
     assert!(peer.client_handshake_state.is_none());
@@ -82,23 +67,17 @@ impl MorfPeer {
   ) -> (Self, impl AsMut<[u8]> + AsRef<[u8]>) {
     let ephemeral_secret = StaticSecret::from(ephemeral_secret);
     let ephemeral_public = PublicKey::from(&ephemeral_secret);
-    let key_material = ephemeral_secret.diffie_hellman(server_public_key);
+    let early_key_material = ephemeral_secret.diffie_hellman(server_public_key);
 
-    let mut initial_encryption_key = [0u8; 32];
-    let early_kdf = Hkdf::<Sha256>::new(None, key_material.as_bytes());
-    early_kdf
-      .expand(INITIAL_ENCRYPTION_KEY_INFO, &mut initial_encryption_key)
-      .unwrap();
+    let initial_encryption_key: [u8; 32] =
+      blake3::derive_key(INITIAL_ENCRYPTION_KEY_INFO, early_key_material.as_bytes());
     let mut init_cipher = <ChaCha20 as chacha20::cipher::KeyIvInit>::new(
       &initial_encryption_key.into(),
       &[0u8; 12].into(),
     );
 
-    let device_static_public_key_hash = &mut {
-      let mut hasher = <Sha256 as sha2::Digest>::new();
-      hasher.update(device_static_public_key.as_bytes());
-      hasher.finalize_fixed()
-    }[..16];
+    let device_static_public_key_hash =
+      &mut (<[u8; 32]>::from(blake3::hash(device_static_public_key.as_bytes())))[..16];
     init_cipher.apply_keystream(device_static_public_key_hash);
 
     let mut output = [0u8; 49];
@@ -106,13 +85,10 @@ impl MorfPeer {
     output[1..33].copy_from_slice(ephemeral_public.as_bytes());
     output[33..49].copy_from_slice(&device_static_public_key_hash);
 
-    let mut server_ephemeral_key_mac_key = [0u8; 32];
-    early_kdf
-      .expand(
-        SERVER_EPHEMERAL_PUBLIC_KEY_MAC_KEY_INFO,
-        &mut server_ephemeral_key_mac_key,
-      )
-      .unwrap();
+    let server_ephemeral_key_mac_key = blake3::derive_key(
+      SERVER_EPHEMERAL_PUBLIC_KEY_MAC_KEY_INFO,
+      early_key_material.as_bytes(),
+    );
 
     (
       Self {
@@ -152,44 +128,26 @@ impl MorfPeer {
     let ephemeral_secret = StaticSecret::from(ephemeral_secret);
     let ephemeral_public = PublicKey::from(&ephemeral_secret);
 
-    let early_kdf = Hkdf::<Sha256>::new(
-      None,
-      static_secret
-        .diffie_hellman(&client_ephemeral_public_key)
-        .as_bytes(),
-    );
+    let early_key_material = static_secret.diffie_hellman(&client_ephemeral_public_key);
 
     let mut init_cipher = <ChaCha20 as chacha20::cipher::KeyIvInit>::new(
-      &{
-        let mut initial_encryption_key = [0u8; 32];
-        early_kdf
-          .expand(INITIAL_ENCRYPTION_KEY_INFO, &mut initial_encryption_key)
-          .unwrap();
-        initial_encryption_key
-      }
-      .into(),
+      &blake3::derive_key(INITIAL_ENCRYPTION_KEY_INFO, early_key_material.as_bytes()).into(),
       &[0u8; 12].into(),
     );
 
     init_cipher.apply_keystream(&mut device_static_public_key_hash);
 
     // Derive the MAC key for server ephemeral public key
-    let mut server_ephemeral_key_mac_key = [0u8; 32];
-    early_kdf
-      .expand(
-        SERVER_EPHEMERAL_PUBLIC_KEY_MAC_KEY_INFO,
-        &mut server_ephemeral_key_mac_key,
-      )
-      .unwrap();
+    let server_ephemeral_key_mac_key = blake3::derive_key(
+      SERVER_EPHEMERAL_PUBLIC_KEY_MAC_KEY_INFO,
+      early_key_material.as_bytes(),
+    );
     let mut output = [0u8; 49];
     output[0] = 1;
     output[1..33].copy_from_slice(ephemeral_public.as_bytes());
     output[33..49].copy_from_slice(
-      &<Hmac<Sha256> as Mac>::new_from_slice(&server_ephemeral_key_mac_key)
-        .unwrap()
-        .chain(ephemeral_public.as_bytes())
-        .finalize()
-        .into_bytes()[..16],
+      &blake3::keyed_hash(&server_ephemeral_key_mac_key, ephemeral_public.as_bytes()).as_bytes()
+        [..16],
     );
 
     Ok((
@@ -224,11 +182,7 @@ impl MorfPeer {
     };
 
     if !constant_time_eq::constant_time_eq(
-      &<Hmac<Sha256> as Mac>::new_from_slice(&st.server_ephemeral_key_mac_key)
-        .unwrap()
-        .chain(&packet[1..33])
-        .finalize()
-        .into_bytes()[..16],
+      &blake3::keyed_hash(&st.server_ephemeral_key_mac_key, &packet[1..33]).as_bytes()[..16],
       &packet[33..49],
     ) {
       return Err(());
@@ -239,29 +193,20 @@ impl MorfPeer {
     let server_ephemeral_public_key =
       PublicKey::from(<[u8; 32]>::try_from(&packet[1..33]).unwrap());
 
-    let session_kdf = {
-      let mut keybuf = [0u8; 64];
-      keybuf[0..32].copy_from_slice(
-        device_static_secret_key
-          .diffie_hellman(&server_ephemeral_public_key)
-          .as_bytes(),
-      );
-      keybuf[32..64].copy_from_slice(
-        st.ephemeral_secret
-          .diffie_hellman(&server_ephemeral_public_key)
-          .as_bytes(),
-      );
-      Hkdf::<Sha256>::new(None, &keybuf)
-    };
+    let mut session_key_material = [0u8; 64];
+    session_key_material[0..32].copy_from_slice(
+      device_static_secret_key
+        .diffie_hellman(&server_ephemeral_public_key)
+        .as_bytes(),
+    );
+    session_key_material[32..64].copy_from_slice(
+      st.ephemeral_secret
+        .diffie_hellman(&server_ephemeral_public_key)
+        .as_bytes(),
+    );
 
-    let mut tx_stream_key = [0u8; 32];
-    session_kdf
-      .expand(C2S_STREAM_KEY_INFO, &mut tx_stream_key)
-      .unwrap();
-    let mut rx_stream_key = [0u8; 32];
-    session_kdf
-      .expand(S2C_STREAM_KEY_INFO, &mut rx_stream_key)
-      .unwrap();
+    let tx_stream_key: [u8; 32] = blake3::derive_key(C2S_STREAM_KEY_INFO, &session_key_material);
+    let rx_stream_key: [u8; 32] = blake3::derive_key(S2C_STREAM_KEY_INFO, &session_key_material);
 
     self.tx_cipher = Some(ChaChaPoly1305::new(&tx_stream_key.into()));
     self.rx_cipher = Some(ChaChaPoly1305::new(&rx_stream_key.into()));
